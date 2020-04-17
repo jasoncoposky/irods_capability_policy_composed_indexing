@@ -9,68 +9,57 @@
 #include "elasticlient/logging.h"
 
 namespace {
-    namespace pe  = irods::policy_engine;
-    namespace idx = irods::indexing;
+    namespace pe   = irods::policy_engine;
+    namespace idx  = irods::indexing;
     namespace fs   = irods::experimental::filesystem;
     namespace fsvr = irods::experimental::filesystem::server;
 
-    irods::error index_metadata(
-          ruleExecInfo_t*             rei
-        , elasticlient::Client&       client
-        , const std::string&          logical_path
-        , const std::string&          index_name
-        , const std::string&          attribute
-        , const std::string&          value
-        , const std::string&          units) {
+    irods::error purge_metadata(
+          ruleExecInfo_t*       rei
+        , elasticlient::Client& client
+        , const std::string&    object_path
+        , const std::string&    index_name
+        , const std::string&    attribute
+        , const std::string&    value
+        , const std::string&    units) {
 
         const std::string md_index_id{
                               idx::get_metadata_index_id(
                                   idx::get_object_index_id(
                                       rei,
-                                      logical_path),
+                                      object_path),
                                   attribute,
                                   value,
                                   units)};
-        std::string payload{
-                        boost::str(
-                        boost::format(
-                        "{ \"logical_path\":\"%s\", \"attribute\":\"%s\", \"value\":\"%s\", \"units\":\"%s\" }")
-                        % logical_path
-                        % attribute
-                        % value
-                        % units)} ;
-
-        const cpr::Response response = client.index(index_name, "text", md_index_id, payload);
-
+        const cpr::Response response = client.remove(index_name, "text", md_index_id);
         if(response.status_code != 200 && response.status_code != 201) {
             return ERROR(
                 SYS_INTERNAL_ERR,
-                boost::format(
-                    "failed to index metadata [%s] [%s] [%s] for [%s] code [%d] message [%s]")
-                    % attribute
-                    % value
-                    % units
-                    % logical_path
-                    % response.status_code
-                    % response.text);
+                boost::format("failed to purge metadata [%s] [%s] [%s] for [%s] code [%d] message [%s]")
+                % attribute
+                % value
+                % units
+                % object_path
+                % response.status_code
+                % response.text);
         }
 
         return SUCCESS();
 
-    } // index_metadata
+    } // purge_metadata
 
-    irods::error index_metadata_for_object(
-          ruleExecInfo_t*             rei
-        , elasticlient::Client&       client
-        , const std::string&          logical_path
-        , const std::string&          index_name) {
+    irods::error purge_metadata_for_object(
+          ruleExecInfo_t*       rei
+        , elasticlient::Client& client
+        , const std::string&    object_path
+        , const std::string&    index_name) {
 
         irods::error last_error{};
-        for(auto&& avu : fsvr::get_metadata(*rei->rsComm, logical_path)) {
-            auto err = index_metadata(
+        for(auto&& avu : fsvr::get_metadata(*rei->rsComm, object_path)) {
+            auto err = purge_metadata(
                              rei
                            , client
-                           , logical_path
+                           , object_path
                            , index_name
                            , avu.attribute
                            , avu.value
@@ -82,9 +71,9 @@ namespace {
 
         return last_error;
 
-    } // index_metadata_for_object
+    } // purge_metadata_for_object
 
-    irods::error metadata_index_elasticsearch(const pe::context& ctx)
+    irods::error metadata_purge_elasticsearch(const pe::context& ctx)
     {
         auto [err, index_name] = idx::get_index_name(ctx.parameters);
         if(!err.ok()) {
@@ -97,42 +86,41 @@ namespace {
         std::tie(err, hosts) = cfg_mgr.get_value("hosts", hosts);
         elasticlient::Client client{hosts};
 
-        std::string user_name{}, logical_path{}, source_resource{}, destination_resource{};
-        std::tie(user_name, logical_path, source_resource, destination_resource) =
+        std::string user_name{}, object_path{}, source_resource{}, destination_resource{};
+        std::tie(user_name, object_path, source_resource, destination_resource) =
             irods::capture_parameters(ctx.parameters, irods::tag_first_resc);
 
         const std::string event{ctx.parameters["event"]};
 
         if("METADATA" == event) {
-            auto md = ctx.parameters["metadata"];
-            const std::string attribute{md["attribute"]}
-                            , value{md["value"]}
-                            , units{md["units"]}
+            const std::string attribute{ctx.parameters["attribute"]}
+                            , value{ctx.parameters["value"]}
+                            , units{ctx.parameters["units"]}
                             , operation{ctx.parameters["operation"]};
-            if("add" != operation && "set" != operation) {
+            if("rm" != operation) {
                 return SUCCESS();
             }
 
-            return index_metadata(
+            return purge_metadata(
                          ctx.rei
                        , client
-                       , logical_path
+                       , object_path
                        , index_name
                        , attribute
                        , value
                        , units);
         }
         else {
-            return index_metadata_for_object(
+            return purge_metadata_for_object(
                          ctx.rei
                        , client
-                       , logical_path
+                       , object_path
                        , index_name);
         }
 
         return SUCCESS();
 
-    } // metadata_index_elasticsearch
+    } // metadata_purge_elasticsearch
 } // namespace
 
 const char usage[] = R"(
@@ -179,8 +167,8 @@ pe::plugin_pointer_type plugin_factory(
 
     return pe::make(
                  _plugin_name
-               , "irods_policy_indexing_metadata_index_elasticsearch"
+               , "irods_policy_indexing_metadata_purge_elasticsearch"
                , usage
-               , metadata_index_elasticsearch);
+               , metadata_purge_elasticsearch);
 
 } // plugin_factory
