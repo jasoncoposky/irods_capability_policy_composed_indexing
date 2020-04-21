@@ -21,41 +21,65 @@ namespace {
         , const std::string&          index_name
         , const std::string&          attribute
         , const std::string&          value
-        , const std::string&          units) {
+        , const std::string&          units
+        , const bool                  log_verbose) {
 
-        const std::string md_index_id{
-                              idx::get_metadata_index_id(
-                                  idx::get_object_index_id(
-                                      rei,
-                                      logical_path),
-                                  attribute,
-                                  value,
-                                  units)};
-        std::string payload{
-                        boost::str(
-                        boost::format(
-                        "{ \"logical_path\":\"%s\", \"attribute\":\"%s\", \"value\":\"%s\", \"units\":\"%s\" }")
-                        % logical_path
-                        % attribute
-                        % value
-                        % units)} ;
-
-        const cpr::Response response = client.index(index_name, "text", md_index_id, payload);
-
-        if(response.status_code != 200 && response.status_code != 201) {
-            return ERROR(
-                SYS_INTERNAL_ERR,
-                boost::format(
-                    "failed to index metadata [%s] [%s] [%s] for [%s] code [%d] message [%s]")
-                    % attribute
-                    % value
-                    % units
-                    % logical_path
-                    % response.status_code
-                    % response.text);
+        if(log_verbose) {
+            rodsLog(
+                LOG_NOTICE
+              , "indexing metadata [%s] [%s] [%s] in [%s] for path [%s]"
+              , attribute.c_str()
+              , value.c_str()
+              , units.c_str()
+              , index_name.c_str()
+              , logical_path.c_str());
         }
 
-        return SUCCESS();
+        try {
+            const std::string md_index_id{
+                                  idx::get_metadata_index_id(
+                                      idx::get_object_index_id(
+                                          rei,
+                                          logical_path),
+                                      attribute,
+                                      value,
+                                      units)};
+            std::string payload{
+                            boost::str(
+                            boost::format(
+                            "{ \"logical_path\":\"%s\", \"attribute\":\"%s\", \"value\":\"%s\", \"units\":\"%s\" }")
+                            % logical_path
+                            % attribute
+                            % value
+                            % units)} ;
+
+            const cpr::Response response = client.index(index_name, "text", md_index_id, payload);
+
+            if(log_verbose) {
+                rodsLog(
+                    LOG_NOTICE
+                  , "response code [%d] response text [%s]"
+                  , response.status_code
+                  , response.text.c_str());
+            }
+
+            if(response.status_code != 200 && response.status_code != 201) {
+                return ERROR( SYS_INTERNAL_ERR,
+                    boost::format(
+                        "failed to index metadata [%s] [%s] [%s] for [%s] code [%d] message [%s]")
+                        % attribute
+                        % value
+                        % units
+                        % logical_path
+                        % response.status_code
+                        % response.text);
+            }
+
+            return SUCCESS();
+        }
+        catch(const irods::exception& e) {
+            return ERROR(e.code(), e.what());
+        }
 
     } // index_metadata
 
@@ -63,7 +87,8 @@ namespace {
           ruleExecInfo_t*             rei
         , elasticlient::Client&       client
         , const std::string&          logical_path
-        , const std::string&          index_name) {
+        , const std::string&          index_name
+        , const bool                  log_verbose) {
 
         irods::error last_error{};
         for(auto&& avu : fsvr::get_metadata(*rei->rsComm, logical_path)) {
@@ -74,7 +99,8 @@ namespace {
                            , index_name
                            , avu.attribute
                            , avu.value
-                           , avu.units);
+                           , avu.units
+                           , log_verbose);
             if(!err.ok()) {
                 last_error = err;
             }
@@ -95,21 +121,27 @@ namespace {
 
         std::vector<std::string> hosts{};
         std::tie(err, hosts) = cfg_mgr.get_value("hosts", hosts);
+
+        std::string log_verbose_param{};
+        std::tie(err, log_verbose_param) = cfg_mgr.get_value("log_errors", "false");
+        const bool log_verbose{"true" == log_verbose_param};
+
         elasticlient::Client client{hosts};
 
         std::string user_name{}, logical_path{}, source_resource{}, destination_resource{};
         std::tie(user_name, logical_path, source_resource, destination_resource) =
             irods::capture_parameters(ctx.parameters, irods::tag_first_resc);
 
-        const std::string event{ctx.parameters["event"]};
+        const std::string event{ctx.parameters.at("event")};
 
         if("METADATA" == event) {
-            auto md = ctx.parameters["metadata"];
-            const std::string attribute{md["attribute"]}
-                            , value{md["value"]}
-                            , units{md["units"]}
-                            , operation{ctx.parameters["operation"]};
-            if("add" != operation && "set" != operation) {
+            const auto [err, operation, attribute, value, units] =
+                idx::extract_metadata_parameters(ctx.parameters);
+            if(!err.ok()) {
+                return err;
+            }
+
+            if(!operation.empty() && "add" != operation && "set" != operation) {
                 return SUCCESS();
             }
 
@@ -120,14 +152,16 @@ namespace {
                        , index_name
                        , attribute
                        , value
-                       , units);
+                       , units
+                       , log_verbose);
         }
         else {
             return index_metadata_for_object(
                          ctx.rei
                        , client
                        , logical_path
-                       , index_name);
+                       , index_name
+                       , log_verbose);
         }
 
         return SUCCESS();

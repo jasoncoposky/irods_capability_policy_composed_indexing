@@ -12,6 +12,56 @@ namespace irods::indexing {
 
     using json = nlohmann::json;
 
+    auto extract_metadata_parameters(const json& params)
+    {
+        auto err = SUCCESS();
+        std::string operation{}, attribute{}, value{}, units{};
+
+        if(!params.contains("metadata")) {
+            err = ERROR(
+                SYS_INVALID_INPUT_PARAM,
+                "parameters do not include a metadata object");
+            return std::make_tuple(err, operation, attribute, value, units);
+        }
+
+        auto md = params.at("metadata");
+
+        if(!md.contains("operation")) {
+            err = ERROR(
+                SYS_INVALID_INPUT_PARAM,
+                "metadata object does not include an operation parameter");
+            return std::make_tuple(err, operation, attribute, value, units);
+        }
+        else {
+            operation = md.at("operation");
+        }
+
+        if(!md.contains("attribute")) {
+            err = ERROR(
+                SYS_INVALID_INPUT_PARAM,
+                "metadata object does not include an attribute parameter");
+            return std::make_tuple(err, operation, attribute, value, units);
+        }
+        else {
+            attribute = md.at("attribute");
+        }
+
+        if(!md.contains("value")) {
+            err = ERROR(
+                SYS_INVALID_INPUT_PARAM,
+                "metadata object does not include an value parameter");
+            return std::make_tuple(err, operation, attribute, value, units);
+        }
+        else {
+            value = md.at("value");
+        }
+
+        if(md.contains("units")) { units = md.at("units"); }
+
+        return std::make_tuple(err, operation, attribute, value, units);
+
+    } // extract_metadata_parameters
+
     std::string get_object_index_id(
         ruleExecInfo_t*    _rei,
         const std::string& _logical_path) {
