@@ -63,8 +63,8 @@ def metadata_event_handler_configured(arg=None):
                          {
                              "active_policy_clauses" : ["post"],
                              "events" : ["metadata"],
-                             "match" : {
-                                 "conditional" : {
+                             "conditional" : {
+                                 "metadata" : {
                                      "attribute" : "irods::indexing::index",
                                      "entity_type" : "collection"
                                  }
