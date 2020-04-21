@@ -85,7 +85,22 @@ namespace irods::indexing {
         std::string attribute{}, value{}, units{};
 
         try {
-            auto md{_params["match"]["metadata"]};
+            if(!_params.contains("conditional")) {
+                return std::make_tuple(
+                        ERROR(
+                           SYS_INVALID_INPUT_PARAM,
+                           "indexing invoked with without conditional metadata"),
+                        std::string{});
+            }
+            if(!_params.at("conditional").contains("metadata")) {
+                return std::make_tuple(
+                        ERROR(
+                           SYS_INVALID_INPUT_PARAM,
+                           "indexing invoked with without conditional metadata"),
+                        std::string{});
+            }
+
+            auto md{_params.at("conditional").at("metadata")};
             attribute = md["attribute"];
             value     = md["value"];
             units     = md["units"];
