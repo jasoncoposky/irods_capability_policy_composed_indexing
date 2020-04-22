@@ -90,6 +90,9 @@ include(/usr/lib/irods/cmake/irods_policy_engine.cmake)
 include(${CMAKE_SOURCE_DIR}/elasticsearch_index_metadata.cmake)
 include(${CMAKE_SOURCE_DIR}/elasticsearch_purge_metadata.cmake)
 
+include(${CMAKE_SOURCE_DIR}/elasticsearch_index_fulltext.cmake)
+include(${CMAKE_SOURCE_DIR}/elasticsearch_purge_fulltext.cmake)
+
 include(CPack)
 
 

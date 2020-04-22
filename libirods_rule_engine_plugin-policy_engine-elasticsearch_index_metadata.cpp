@@ -15,14 +15,14 @@ namespace {
     namespace fsvr = irods::experimental::filesystem::server;
 
     irods::error index_metadata(
-          ruleExecInfo_t*             rei
-        , elasticlient::Client&       client
-        , const std::string&          logical_path
-        , const std::string&          index_name
-        , const std::string&          attribute
-        , const std::string&          value
-        , const std::string&          units
-        , const bool                  log_verbose) {
+          rsComm_t*             comm
+        , elasticlient::Client& client
+        , const std::string&    logical_path
+        , const std::string&    index_name
+        , const std::string&    attribute
+        , const std::string&    value
+        , const std::string&    units
+        , const bool            log_verbose) {
 
         if(log_verbose) {
             rodsLog(
@@ -39,7 +39,7 @@ namespace {
             const std::string md_index_id{
                                   idx::get_metadata_index_id(
                                       idx::get_object_index_id(
-                                          rei,
+                                          comm,
                                           logical_path),
                                       attribute,
                                       value,
@@ -84,16 +84,16 @@ namespace {
     } // index_metadata
 
     irods::error index_metadata_for_object(
-          ruleExecInfo_t*             rei
-        , elasticlient::Client&       client
-        , const std::string&          logical_path
-        , const std::string&          index_name
-        , const bool                  log_verbose) {
+          rsComm_t*              comm
+        , elasticlient::Client&  client
+        , const std::string&     logical_path
+        , const std::string&     index_name
+        , const bool             log_verbose) {
 
         irods::error last_error{};
-        for(auto&& avu : fsvr::get_metadata(*rei->rsComm, logical_path)) {
+        for(auto&& avu : fsvr::get_metadata(*comm, logical_path)) {
             auto err = index_metadata(
-                             rei
+                             comm
                            , client
                            , logical_path
                            , index_name
@@ -146,7 +146,7 @@ namespace {
             }
 
             return index_metadata(
-                         ctx.rei
+                         ctx.rei->rsComm
                        , client
                        , logical_path
                        , index_name
@@ -157,7 +157,7 @@ namespace {
         }
         else {
             return index_metadata_for_object(
-                         ctx.rei
+                         ctx.rei->rsComm
                        , client
                        , logical_path
                        , index_name

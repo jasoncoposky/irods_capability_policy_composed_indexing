@@ -73,7 +73,7 @@ def metadata_event_handler_configured(arg=None):
                              "policy" : "irods_policy_query_processor",
                              "parameters" : {
                                    "query_string" : "SELECT USER_NAME, COLL_NAME, DATA_NAME, RESC_NAME WHERE COLL_NAME = 'IRODS_TOKEN_COLLECTION_NAME'",
-                                   "query_limit" : 1,
+                                   "query_limit" : 0,
                                    "query_type" : "general",
                                    "number_of_threads" : 1,
                                    "policy_to_invoke" : "irods_policy_event_generator_object_metadata",
@@ -128,7 +128,7 @@ def metadata_event_handler_configured(arg=None):
                              "policy" : "irods_policy_query_processor",
                              "parameters" : {
                                    "query_string" : "SELECT USER_NAME, COLL_NAME, DATA_NAME, RESC_NAME WHERE COLL_NAME = 'IRODS_TOKEN_COLLECTION_NAME'",
-                                   "query_limit" : 1,
+                                   "query_limit" : 0,
                                    "query_type" : "general",
                                    "number_of_threads" : 1,
                                    "policy_to_invoke" : "irods_policy_event_generator_object_metadata",

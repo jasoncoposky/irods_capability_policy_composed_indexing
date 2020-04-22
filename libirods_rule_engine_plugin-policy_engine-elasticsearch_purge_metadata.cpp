@@ -15,7 +15,7 @@ namespace {
     namespace fsvr = irods::experimental::filesystem::server;
 
     irods::error purge_metadata(
-          ruleExecInfo_t*       rei
+          rsComm_t*             comm
         , elasticlient::Client& client
         , const std::string&    object_path
         , const std::string&    index_name
@@ -28,7 +28,7 @@ namespace {
             const std::string md_index_id{
                                   idx::get_metadata_index_id(
                                       idx::get_object_index_id(
-                                          rei,
+                                          comm,
                                           object_path),
                                       attribute,
                                       value,
@@ -65,16 +65,16 @@ namespace {
     } // purge_metadata
 
     irods::error purge_metadata_for_object(
-          ruleExecInfo_t*       rei
+          rsComm_t*             comm
         , elasticlient::Client& client
         , const std::string&    object_path
         , const std::string&    index_name
         , const bool            log_verbose) {
 
         irods::error last_error{};
-        for(auto&& avu : fsvr::get_metadata(*rei->rsComm, object_path)) {
+        for(auto&& avu : fsvr::get_metadata(*comm, object_path)) {
             auto err = purge_metadata(
-                             rei
+                             comm
                            , client
                            , object_path
                            , index_name
@@ -135,7 +135,7 @@ namespace {
             }
 
             return purge_metadata(
-                         ctx.rei
+                         ctx.rei->rsComm
                        , client
                        , object_path
                        , index_name
@@ -146,7 +146,7 @@ namespace {
         }
         else {
             return purge_metadata_for_object(
-                         ctx.rei
+                         ctx.rei->rsComm
                        , client
                        , object_path
                        , index_name
