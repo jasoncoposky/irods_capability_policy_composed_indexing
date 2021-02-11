@@ -39,54 +39,60 @@ def metadata_event_handler_configured(arg=None):
                        {
                              "active_policy_clauses" : ["post"],
                              "events" : ["metadata"],
-                             "policy"    : "irods_policy_event_delegate_collection_metadata",
+                             "conditional" : {
+                                 "metadata_exists" : {
+                                     "recursive" : "true",
+                                     "attribute" : "irods::indexing::index",
+                                     "entity_type" : "data_object"
+                                 },
+                             },
+                             "policy_to_invoke"    : "irods_policy_indexing_metadata_index_elasticsearch",
                              "configuration" : {
-                                 "policies_to_invoke" : [
-                                     {
-                                         "conditional" : {
-                                             "metadata" : {
-                                                 "attribute" : "irods::indexing::index",
-                                                 "entity_type" : "data_object"
-                                             },
-                                         },
-                                         "policy"    : "irods_policy_indexing_metadata_index_elasticsearch",
-                                         "configuration" : {
-                                             "hosts" : ["http://localhost:9200/"],
-                                             "bulk_count" : 100,
-                                             "read_size" : 4194304
-                                         }
-                                     }
-                                 ]
+                                 "hosts" : ["http://localhost:9200/"],
+                                 "bulk_count" : 100,
+                                 "read_size" : 4194304
                              }
-                         }
-                         ,
+
+                         },
                          {
                              "active_policy_clauses" : ["post"],
                              "events" : ["metadata"],
                              "conditional" : {
-                                 "metadata" : {
+                                 "metadata_exists" : {
+                                     "recursive" : "true",
                                      "attribute" : "irods::indexing::index",
                                      "entity_type" : "collection"
+                                 },
+                             },
+                             "policy_to_invoke"    : "irods_policy_indexing_metadata_index_elasticsearch",
+                             "configuration" : {
+                                 "hosts" : ["http://localhost:9200/"],
+                                 "bulk_count" : 100,
+                                 "read_size" : 4194304
+                             }
+
+                         },
+                         {
+                             "active_policy_clauses" : ["post"],
+                             "events" : ["metadata"],
+                             "conditional" : {
+                                 "metadata_applied" : {
+                                     "attribute" : "irods::indexing::index",
+                                     "entity_type" : "collection",
+                                     "operation" : ["set", "add"]
                                  }
                              },
-                             "policy" : "irods_policy_query_processor",
+                             "policy_to_invoke" : "irods_policy_query_processor",
                              "parameters" : {
-                                   "query_string" : "SELECT USER_NAME, COLL_NAME, DATA_NAME, RESC_NAME WHERE COLL_NAME = 'IRODS_TOKEN_COLLECTION_NAME'",
+                                   "query_string" : "SELECT USER_NAME, COLL_NAME, DATA_NAME, RESC_NAME WHERE COLL_NAME = 'IRODS_TOKEN_COLLECTION_NAME_END_TOKEN'",
                                    "query_limit" : 0,
                                    "query_type" : "general",
                                    "number_of_threads" : 1,
-                                   "policy_to_invoke" : "irods_policy_event_generator_object_metadata",
+                                   "policy_to_invoke" : "irods_policy_indexing_metadata_index_elasticsearch",
                                    "configuration" : {
-                                       "policies_to_invoke" : [
-                                           {
-                                               "policy" : "irods_policy_indexing_metadata_index_elasticsearch",
-                                               "configuration" : {
-                                                        "hosts" : ["http://localhost:9200/"],
-                                                        "bulk_count" : 100,
-                                                        "read_size" : 4194304
-                                               }
-                                           }
-                                       ]
+                                            "hosts" : ["http://localhost:9200/"],
+                                            "bulk_count" : 100,
+                                            "read_size" : 4194304
                                    }
                              }
                          }
@@ -94,27 +100,6 @@ def metadata_event_handler_configured(arg=None):
                 }
             }
         )
-
-        irods_config.server_config['plugin_configuration']['rule_engines'].insert(0,
-           {
-                "instance_name": "irods_rule_engine_plugin-event_generator-object_metadata-instance",
-                "plugin_name": "irods_rule_engine_plugin-event_generator-object_metadata",
-                "plugin_specific_configuration": {
-                    "log_errors" : "true"
-                }
-           }
-        )
-
-        irods_config.server_config['plugin_configuration']['rule_engines'].insert(0,
-           {
-                "instance_name": "irods_rule_engine_plugin-event_delegate-collection_metadata-instance",
-                "plugin_name": "irods_rule_engine_plugin-event_delegate-collection_metadata",
-                "plugin_specific_configuration": {
-                    "log_errors" : "true"
-                }
-           }
-        )
-
 
         irods_config.server_config['plugin_configuration']['rule_engines'].insert(0,
            {
@@ -214,7 +199,7 @@ class TestElasticSearchIndexingMetadata(ResourceBase, unittest.TestCase):
     def tearDown(self):
         super(TestElasticSearchIndexingMetadata, self).tearDown()
 
-    def test_indexing_add_metadata(self):
+    def test_indexing_add_metadata_to_object(self):
         self.repave_index()
         with session.make_session_for_existing_admin() as admin_session:
             admin_session.assert_icommand('imeta set -C /tempZone/home irods::indexing::index metadata_index::metadata elasticsearch')
@@ -235,6 +220,25 @@ class TestElasticSearchIndexingMetadata(ResourceBase, unittest.TestCase):
                 admin_session.assert_icommand('irm -f ' + filename)
                 admin_session.assert_icommand('iadmin rum')
 
+    def test_indexing_add_metadata_to_collection(self):
+        self.repave_index()
+        with session.make_session_for_existing_admin() as admin_session:
+            admin_session.assert_icommand('imeta set -C /tempZone/home irods::indexing::index metadata_index::metadata elasticsearch')
+            admin_session.assert_icommand('imkdir test_coll')
+
+            try:
+                with metadata_event_handler_configured():
+                    admin_session.assert_icommand('imeta set -C test_coll a0 v0 u0')
+
+                assert_index_content('"attribute" : "a0"')
+                assert_index_content('"value" : "v0"')
+                assert_index_content('"units" : "u0"')
+
+            finally:
+                admin_session.assert_icommand('imeta rm -C /tempZone/home irods::indexing::index metadata_index::metadata elasticsearch')
+                admin_session.assert_icommand('irm -r test_coll')
+                admin_session.assert_icommand('iadmin rum')
+
     def test_indexing_full_collection(self):
         self.repave_index()
         with session.make_session_for_existing_admin() as admin_session:
@@ -248,11 +252,15 @@ class TestElasticSearchIndexingMetadata(ResourceBase, unittest.TestCase):
                 admin_session.assert_icommand('iput -fr ' + dir1path, 'STDOUT_SINGLELINE', 'Running recursive pre-scan')
                 admin_session.assert_icommand('ils -l ' + dir1, 'STDOUT_SINGLELINE', 'demoResc')
                 admin_session.assert_icommand('imeta set -d ' + dir1+'/0' + ' a0 v0 u0')
+                admin_session.assert_icommand('imeta set -d ' + dir1+'/1' + ' a1 v1 u1')
                 with metadata_event_handler_configured():
                     admin_session.assert_icommand('imeta set -C /tempZone/home/rods/dir1 irods::indexing::index metadata_index::metadata elasticsearch')
                 assert_index_content('"attribute" : "a0"')
                 assert_index_content('"value" : "v0"')
                 assert_index_content('"units" : "u0"')
+                assert_index_content('"attribute" : "a1"')
+                assert_index_content('"value" : "v1"')
+                assert_index_content('"units" : "u1"')
 
             finally:
                 admin_session.assert_icommand('irm -rf ' + dir1)

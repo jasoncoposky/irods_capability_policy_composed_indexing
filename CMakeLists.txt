@@ -54,6 +54,7 @@ add_compile_options(-std=c++17)
 link_libraries(c++abi)
 include_directories(
     ${IRODS_EXTERNALS_FULLPATH_CLANG}/include/c++/v1
+    ${IRODS_EXTERNALS_FULLPATH_FMT}/include
     )
 
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
@@ -81,7 +82,7 @@ set(CPACK_RPM_PACKAGE_AUTOPROV 0)
 
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 
-include(/usr/lib/irods/cmake/irods_policy_engine.cmake)
+include(/usr/lib/irods/cmake/policy_composition_framework_cmake_utilities.cmake)
 
 # CPACK names component package files as "${CPACK_PACKAGE_FILE_NAME}-${COMPONENT_NAME}"
 # CPackDeb TO_UPPERs all the component names when checking the ${CPACK_DEBIAN_<COMPONENT>...} variables
@@ -94,12 +95,3 @@ include(${CMAKE_SOURCE_DIR}/elasticsearch_index_fulltext.cmake)
 include(${CMAKE_SOURCE_DIR}/elasticsearch_purge_fulltext.cmake)
 
 include(CPack)
-
-
-
-
-
-
-
-
-

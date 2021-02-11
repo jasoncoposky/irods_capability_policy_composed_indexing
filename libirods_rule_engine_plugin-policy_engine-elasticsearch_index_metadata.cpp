@@ -1,16 +1,19 @@
 
 #include "utilities.hpp"
 
-#include "policy_engine_configuration_manager.hpp"
+#include "policy_composition_framework_configuration_manager.hpp"
+#include "policy_composition_framework_parameter_capture.hpp"
 
 #include "cpr/response.h"
 #include "elasticlient/client.h"
 #include "elasticlient/bulk.h"
 #include "elasticlient/logging.h"
 
+#include "fmt/format.h"
+
 namespace {
-    namespace pe  = irods::policy_engine;
-    namespace idx = irods::indexing;
+    namespace pe   = irods::policy_composition::policy_engine;
+    namespace idx  = irods::indexing;
     namespace fs   = irods::experimental::filesystem;
     namespace fsvr = irods::experimental::filesystem::server;
 
@@ -38,20 +41,19 @@ namespace {
         try {
             const std::string md_index_id{
                                   idx::get_metadata_index_id(
-                                      idx::get_object_index_id(
+                                      idx::get_id_for_logical_path(
                                           comm,
                                           logical_path),
                                       attribute,
                                       value,
                                       units)};
             std::string payload{
-                            boost::str(
-                            boost::format(
-                            "{ \"logical_path\":\"%s\", \"attribute\":\"%s\", \"value\":\"%s\", \"units\":\"%s\" }")
-                            % logical_path
-                            % attribute
-                            % value
-                            % units)} ;
+                            fmt::format(
+                            "{{ \"logical_path\":\"{}\", \"attribute\":\"{}\", \"value\":\"{}\", \"units\":\"{}\" }}"
+                            , logical_path
+                            , attribute
+                            , value
+                            , units)} ;
 
             const cpr::Response response = client.index(index_name, "text", md_index_id, payload);
 
@@ -65,19 +67,25 @@ namespace {
 
             if(response.status_code != 200 && response.status_code != 201) {
                 return ERROR( SYS_INTERNAL_ERR,
-                    boost::format(
-                        "failed to index metadata [%s] [%s] [%s] for [%s] code [%d] message [%s]")
-                        % attribute
-                        % value
-                        % units
-                        % logical_path
-                        % response.status_code
-                        % response.text);
+                    fmt::format(
+                        "failed to index metadata [{}] [{}] [{}] for [{}] code [{}] message [{}]"
+                        , attribute
+                        , value
+                        , units
+                        , logical_path
+                        , response.status_code
+                        , response.text));
             }
 
             return SUCCESS();
         }
         catch(const irods::exception& e) {
+            rodsLog(
+                LOG_ERROR,
+                "%s exception caught [%d] [%s]",
+                __FUNCTION__,
+                e.code(),
+                e.what());
             return ERROR(e.code(), e.what());
         }
 
@@ -90,7 +98,8 @@ namespace {
         , const std::string&     index_name
         , const bool             log_verbose) {
 
-        irods::error last_error{};
+        auto last_error = SUCCESS();
+
         for(auto&& avu : fsvr::get_metadata(*comm, logical_path)) {
             auto err = index_metadata(
                              comm
@@ -110,41 +119,39 @@ namespace {
 
     } // index_metadata_for_object
 
-    irods::error metadata_index_elasticsearch(const pe::context& ctx)
+    irods::error metadata_index_elasticsearch(const pe::context& ctx, pe::arg_type out)
     {
-        auto [err, index_name] = idx::get_index_name(ctx.parameters);
-        if(!err.ok()) {
-            return err;
+        idx::throw_if_metadata_is_missing(ctx.parameters);
+
+        idx::throw_if_conditional_metadata_is_missing(ctx.parameters);
+
+        if(idx::event_is_invalid(ctx.parameters, {"METADATA"})) {
+            return SUCCESS();
         }
 
-        pe::configuration_manager cfg_mgr{ctx.instance_name, ctx.configuration};
-
-        std::vector<std::string> hosts{};
-        std::tie(err, hosts) = cfg_mgr.get_value("hosts", hosts);
-
-        std::string log_verbose_param{};
-        std::tie(err, log_verbose_param) = cfg_mgr.get_value("log_errors", "false");
-        const bool log_verbose{"true" == log_verbose_param};
+        // clang-format off
+        const auto cfg_mgr     = pe::configuration_manager{ctx.instance_name, ctx.configuration};
+        const auto hosts       = cfg_mgr.get("hosts", std::vector<std::string>{});
+        const auto log_verbose = std::string{"true"} == cfg_mgr.get(std::string{"log_errors"}, std::string{"false"});
+        const auto is_idx_md   = idx::metadata_is_indexing(ctx.parameters.at("metadata"));
+        const auto index_name  = idx::get_index_name(ctx.parameters);
+        // clang-format on
 
         elasticlient::Client client{hosts};
 
-        std::string user_name{}, logical_path{}, source_resource{}, destination_resource{};
-        std::tie(user_name, logical_path, source_resource, destination_resource) =
-            irods::capture_parameters(ctx.parameters, irods::tag_first_resc);
+        auto [u, logical_path, sr, dr] =
+            capture_parameters(ctx.parameters, tag_first_resc);
 
-        const std::string event{ctx.parameters.at("event")};
+        const auto [attribute, value, units, operation, entity, entity_type] =
+            idx::extract_all(ctx.parameters.at("metadata"));
 
-        if("METADATA" == event) {
-            const auto [err, operation, attribute, value, units] =
-                idx::extract_metadata_parameters(ctx.parameters);
-            if(!err.ok()) {
-                return err;
-            }
+        if("set" != operation && "add" != operation) {
+            return SUCCESS();
+        }
 
-            if(!operation.empty() && "add" != operation && "set" != operation) {
-                return SUCCESS();
-            }
-
+        if("data_object" == entity_type
+           || ("collection" == entity_type && !is_idx_md)) {
+            // adding an individual avu to an object or collection
             return index_metadata(
                          ctx.rei->rsComm
                        , client
@@ -155,7 +162,8 @@ namespace {
                        , units
                        , log_verbose);
         }
-        else {
+        else if("collection" == entity_type && is_idx_md) {
+            // annotated a collection to be indexed
             return index_metadata_for_object(
                          ctx.rei->rsComm
                        , client
@@ -167,6 +175,7 @@ namespace {
         return SUCCESS();
 
     } // metadata_index_elasticsearch
+
 } // namespace
 
 const char usage[] = R"(

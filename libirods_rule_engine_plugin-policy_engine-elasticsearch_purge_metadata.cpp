@@ -1,7 +1,8 @@
 
 #include "utilities.hpp"
 
-#include "policy_engine_configuration_manager.hpp"
+#include "policy_composition_framework_configuration_manager.hpp"
+#include "policy_composition_framework_parameter_capture.hpp"
 
 #include "cpr/response.h"
 #include "elasticlient/client.h"
@@ -9,7 +10,7 @@
 #include "elasticlient/logging.h"
 
 namespace {
-    namespace pe   = irods::policy_engine;
+    namespace pe   = irods::policy_composition::policy_engine;
     namespace idx  = irods::indexing;
     namespace fs   = irods::experimental::filesystem;
     namespace fsvr = irods::experimental::filesystem::server;
@@ -27,7 +28,7 @@ namespace {
         try {
             const std::string md_index_id{
                                   idx::get_metadata_index_id(
-                                      idx::get_object_index_id(
+                                      idx::get_id_for_logical_path(
                                           comm,
                                           object_path),
                                       attribute,
@@ -36,13 +37,13 @@ namespace {
 
             const cpr::Response response = client.remove(index_name, "text", md_index_id);
 
-                if(log_verbose) {
-                    rodsLog(
-                        LOG_NOTICE
-                      , "response code [%d] response text [%s]"
-                      , response.status_code
-                      , response.text.c_str());
-                }
+            if(log_verbose) {
+                rodsLog(
+                    LOG_NOTICE
+                  , "response code [%d] response text [%s]"
+                  , response.status_code
+                  , response.text.c_str());
+            }
 
             if(response.status_code != 200 && response.status_code != 201) {
                 return ERROR(
@@ -71,7 +72,8 @@ namespace {
         , const std::string&    index_name
         , const bool            log_verbose) {
 
-        irods::error last_error{};
+        irods::error last_error = SUCCESS();
+
         for(auto&& avu : fsvr::get_metadata(*comm, object_path)) {
             auto err = purge_metadata(
                              comm
@@ -93,43 +95,33 @@ namespace {
 
     namespace idx = irods::indexing;
 
-    irods::error metadata_purge_elasticsearch(const pe::context& ctx)
+    irods::error metadata_purge_elasticsearch(const pe::context& ctx, pe::arg_type out)
     {
-        auto [err, index_name] = idx::get_index_name(ctx.parameters);
-        if(!err.ok()) {
-            return err;
+        idx::throw_if_metadata_is_missing(ctx.parameters);
+
+        idx::throw_if_conditional_metadata_is_missing(ctx.parameters);
+
+        if(idx::event_is_invalid(ctx.parameters, {"METADATA"})) {
+            return SUCCESS();
         }
 
-        pe::configuration_manager cfg_mgr{ctx.instance_name, ctx.configuration};
+        // clang-format off
+        const auto cfg   = pe::configuration_manager{ctx.instance_name, ctx.configuration};
+        const auto hosts = cfg.get("hosts", std::vector<std::string>{});
+        const auto verb  = std::string{"true"} == cfg.get(std::string{"log_errors"}, std::string{"false"});
+        // clang-format on
 
-        std::vector<std::string> hosts{};
-        std::tie(err, hosts) = cfg_mgr.get_value("hosts", hosts);
+        auto [u, logical_path, sr, dr] =
+            capture_parameters(ctx.parameters, tag_first_resc);
 
-        std::string log_verbose_param{};
-        std::tie(err, log_verbose_param) = cfg_mgr.get_value("log_errors", "false");
-        const bool log_verbose{"true" == log_verbose_param};
+        const auto index_name = idx::get_index_name(ctx.parameters);
+
+        const auto [attribute, value, units, operation, entity, entity_type] =
+            idx::extract_all(ctx.parameters.at("metadata"));
 
         elasticlient::Client client{hosts};
 
-        std::string user_name{}, object_path{}, source_resource{}, destination_resource{};
-        std::tie(user_name, object_path, source_resource, destination_resource) =
-            irods::capture_parameters(ctx.parameters, irods::tag_first_resc);
-
-        if(!ctx.parameters.contains("event")) {
-            return ERROR(
-                       SYS_INVALID_INPUT_PARAM,
-                       "parameters do not include an event");
-        }
-
-        const std::string event{ctx.parameters.at("event")};
-
-        if("METADATA" == event) {
-            const auto [err, operation, attribute, value, units] =
-                idx::extract_metadata_parameters(ctx.parameters);
-            if(!err.ok()) {
-                return err;
-            }
-
+        if("data_object" == entity_type) {
             if(!operation.empty() && "rm" != operation) {
                 return SUCCESS();
             }
@@ -137,20 +129,27 @@ namespace {
             return purge_metadata(
                          ctx.rei->rsComm
                        , client
-                       , object_path
+                       , logical_path
                        , index_name
                        , attribute
                        , value
                        , units
-                       , log_verbose);
+                       , verb);
         }
-        else {
+        else if("collection" == entity_type) {
             return purge_metadata_for_object(
                          ctx.rei->rsComm
                        , client
-                       , object_path
+                       , logical_path
                        , index_name
-                       , log_verbose);
+                       , verb);
+        }
+        else {
+            return ERROR(
+                       SYS_NOT_SUPPORTED,
+                       fmt::format("%s - entity_type is not supported [%s]"
+                       , __FUNCTION__
+                       , entity_type));
         }
 
         return SUCCESS();

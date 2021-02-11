@@ -4,7 +4,9 @@
 
 #include "utilities.hpp"
 
-#include "policy_engine_configuration_manager.hpp"
+#include "policy_composition_framework_configuration_manager.hpp"
+#include "policy_composition_framework_parameter_capture.hpp"
+
 #include "transport/default_transport.hpp"
 #include "dstream.hpp"
 
@@ -12,8 +14,10 @@
 #include "elasticlient/client.h"
 #include "elasticlient/logging.h"
 
+#include "fmt/format.h"
+
 namespace {
-    namespace pe   = irods::policy_engine;
+    namespace pe   = irods::policy_composition::policy_engine;
     namespace idx  = irods::indexing;
     namespace fs   = irods::experimental::filesystem;
     namespace fsvr = irods::experimental::filesystem::server;
@@ -35,17 +39,16 @@ namespace {
 
         uint64_t chunk_counter{};
 
-        const std::string object_id{idx::get_object_index_id(comm, logical_path)};
+        const std::string object_id{idx::get_id_for_logical_path(comm, logical_path)};
 
         bool done{false};
         while(!done) {
             std::string index_id{
-                            boost::str(
-                            boost::format(
-                            "%s%s%d")
-                            % object_id
-                            % idx::indexer_separator
-                            % chunk_counter)};
+                            fmt::format(
+                            "{}{}{}"
+                            , object_id
+                            , idx::indexer_separator
+                            , chunk_counter)};
 
             ++chunk_counter;
 
@@ -65,40 +68,32 @@ namespace {
         }
     } // log_fcn
 
-    irods::error full_text_purge_elasticsearch(const pe::context& ctx)
+    irods::error full_text_purge_elasticsearch(const pe::context& ctx, pe::arg_type out)
     {
-        auto [err, index_name] = idx::get_index_name(ctx.parameters);
-        if(!err.ok()) {
-            return err;
+        if(idx::event_is_invalid(ctx.parameters, {"unlink", "unregister", "metadata"})) {
+            return SUCCESS();
         }
 
-        pe::configuration_manager cfg_mgr{ctx.instance_name, ctx.configuration};
+        // clang-format off
+        const auto cfg_mgr     = pe::configuration_manager{ctx.instance_name, ctx.configuration};
+        const auto event       = std::string{ctx.parameters.at("event")};
+        const auto hosts       = cfg_mgr.get("hosts", std::vector<std::string>{});
+        const auto log_verbose = std::string{"true"} == cfg_mgr.get("log_errors", std::string{"false"});
+        const auto index_name  = idx::get_index_name(ctx.parameters);
+        // clang-format on
 
-        std::vector<std::string> hosts{};
-        std::tie(err, hosts) = cfg_mgr.get_value("hosts", hosts);
+        auto [un, logical_path, sr, dr] =
+            capture_parameters(ctx.parameters, tag_first_resc);
 
-        std::string log_verbose_param{};
-        std::tie(err, log_verbose_param) = cfg_mgr.get_value("log_errors", "false");
-        const bool log_verbose{"true" == log_verbose_param};
+        std::shared_ptr<elasticlient::Client> client =
+            std::make_shared<elasticlient::Client>(hosts);
 
-        std::string user_name{}, logical_path{}, source_resource{}, destination_resource{};
-        std::tie(user_name, logical_path, source_resource, destination_resource) =
-            irods::capture_parameters(ctx.parameters, irods::tag_first_resc);
-
-        const std::string event{ctx.parameters.at("event")};
-
-        if("UNLINK" == event || "UNREGISTER" == event || "METADATA" == event) {
-            elasticlient::setLogFunction(log_fcn);
-            std::shared_ptr<elasticlient::Client> client =
-                std::make_shared<elasticlient::Client>(hosts);
-
-            return purge_fulltext(
-                         ctx.rei->rsComm
-                       , client
-                       , logical_path
-                       , index_name
-                       , log_verbose);
-        }
+        return purge_fulltext(
+                     ctx.rei->rsComm
+                   , client
+                   , logical_path
+                   , index_name
+                   , log_verbose);
 
         return SUCCESS();
 

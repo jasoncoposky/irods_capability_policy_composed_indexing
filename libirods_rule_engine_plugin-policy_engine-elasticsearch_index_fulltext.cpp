@@ -4,7 +4,9 @@
 
 #include "utilities.hpp"
 
-#include "policy_engine_configuration_manager.hpp"
+#include "policy_composition_framework_configuration_manager.hpp"
+#include "policy_composition_framework_parameter_capture.hpp"
+
 #include "transport/default_transport.hpp"
 #include "dstream.hpp"
 
@@ -13,8 +15,10 @@
 #include "elasticlient/bulk.h"
 #include "elasticlient/logging.h"
 
+#include "fmt/format.h"
+
 namespace {
-    namespace pe   = irods::policy_engine;
+    namespace pe   = irods::policy_composition::policy_engine;
     namespace idx  = irods::indexing;
     namespace fs   = irods::experimental::filesystem;
     namespace fsvr = irods::experimental::filesystem::server;
@@ -36,7 +40,7 @@ namespace {
               , logical_path.c_str());
         }
 
-        const std::string object_id{idx::get_object_index_id(comm, logical_path)};
+        const std::string object_id{idx::get_id_for_logical_path(comm, logical_path)};
 
         elasticlient::Bulk bulkIndexer(client);
         elasticlient::SameIndexBulkData bulk(index_name, bulk_count);
@@ -69,20 +73,18 @@ namespace {
             std::string cleaned{idx::correct_non_utf_8(&data)};
 
             std::string index_id{
-                            boost::str(
-                            boost::format(
-                            "%s%s%d")
-                            % object_id
-                            % idx::indexer_separator
-                            % chunk_counter)};
+                            fmt::format(
+                            "{}{}{}"
+                            , object_id
+                            , idx::indexer_separator
+                            , chunk_counter)};
             ++chunk_counter;
 
             std::string payload{
-                            boost::str(
-                            boost::format(
-                            "{ \"logical_path\" : \"%s\", \"data\" : \"%s\" }")
-                            % logical_path
-                            % cleaned)};
+                            fmt::format(
+                            "{{ \"logical_path\" : \"{}\", \"data\" : \"{}\" }}"
+                            , logical_path
+                            , cleaned)};
 
             need_final_perform = true;
             bool done = bulk.indexDocument("text", index_id, payload.data());
@@ -94,9 +96,9 @@ namespace {
                 if(error_count > 0) {
                     return ERROR(
                                SYS_INTERNAL_ERR,
-                               boost::format("Encountered %d errors when indexing [%s]")
-                                % error_count
-                                % logical_path);
+                               fmt::format("Encountered {} errors when indexing [{}]"
+                                , error_count
+                                , logical_path));
                 }
             }
         } // while
@@ -107,9 +109,9 @@ namespace {
             if(error_count > 0) {
                 return ERROR(
                            SYS_INTERNAL_ERR,
-                           boost::format("Encountered %d errors when indexing [%s]")
-                            % error_count
-                            % logical_path);
+                           fmt::format("Encountered {} errors when indexing [{}]"
+                            , error_count
+                            , logical_path));
             }
         }
 
@@ -122,48 +124,38 @@ namespace {
         }
     } // log_fcn
 
-    irods::error full_text_index_elasticsearch(const pe::context& ctx)
+    irods::error full_text_index_elasticsearch(const pe::context& ctx, pe::arg_type out)
     {
-        auto [err, index_name] = idx::get_index_name(ctx.parameters);
-        if(!err.ok()) {
-            return err;
+        if(idx::event_is_invalid(ctx.parameters, {"put", "write", "metadata"})) {
+            return SUCCESS();
         }
 
-        pe::configuration_manager cfg_mgr{ctx.instance_name, ctx.configuration};
+        // clang-format off
+        const auto cfg_mgr     = pe::configuration_manager{ctx.instance_name, ctx.configuration};
+        const auto event       = std::string{ctx.parameters.at("event")};
+        const auto hosts       = cfg_mgr.get("hosts", std::vector<std::string>{});
+        const auto log_verbose = std::string{"true"} == cfg_mgr.get("log_errors", std::string{"false"});
+        const auto read_size   = cfg_mgr.get("read_size", uint64_t{4194304});
+        const auto bulk_count  = cfg_mgr.get("bulk_count", uint32_t{100});
+        const auto index_name  = idx::get_index_name(ctx.parameters);
+        // clang-format on
 
-        std::vector<std::string> hosts{};
-        std::tie(err, hosts) = cfg_mgr.get_value("hosts", hosts);
+        auto [un, logical_path, sr, dr] =
+            capture_parameters(ctx.parameters, tag_first_resc);
 
-        std::string log_verbose_param{};
-        std::tie(err, log_verbose_param) = cfg_mgr.get_value("log_errors", "false");
-        const bool log_verbose{"true" == log_verbose_param};
+        elasticlient::setLogFunction(log_fcn);
 
-        uint64_t read_size{};
-        std::tie(err, read_size) = cfg_mgr.get_value("read_size", 4194304);
+        std::shared_ptr<elasticlient::Client> client =
+            std::make_shared<elasticlient::Client>(hosts);
 
-        uint32_t bulk_count{};
-        std::tie(err, bulk_count) = cfg_mgr.get_value("bulk_count", 100);
-
-        std::string user_name{}, logical_path{}, source_resource{}, destination_resource{};
-        std::tie(user_name, logical_path, source_resource, destination_resource) =
-            irods::capture_parameters(ctx.parameters, irods::tag_first_resc);
-
-        const std::string event{ctx.parameters.at("event")};
-
-        if("PUT" == event || "WRITE" == event || "METADATA" == event) {
-            elasticlient::setLogFunction(log_fcn);
-            std::shared_ptr<elasticlient::Client> client =
-                std::make_shared<elasticlient::Client>(hosts);
-
-            return index_fulltext(
-                         ctx.rei->rsComm
-                       , client
-                       , read_size
-                       , bulk_count
-                       , logical_path
-                       , index_name
-                       , log_verbose);
-        }
+        return index_fulltext(
+                     ctx.rei->rsComm
+                   , client
+                   , read_size
+                   , bulk_count
+                   , logical_path
+                   , index_name
+                   , log_verbose);
 
         return SUCCESS();
 

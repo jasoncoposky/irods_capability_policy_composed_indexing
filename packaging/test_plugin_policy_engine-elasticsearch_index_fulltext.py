@@ -39,24 +39,18 @@ def index_event_handler_configured(arg=None):
                         {
                             "active_policy_clauses" : ["post"],
                             "events" : ["put", "write"],
-                            "policy"    : "irods_policy_event_delegate_collection_metadata",
+                            "conditional" : {
+                                "metadata_exists" : {
+                                    "recursive" : "true",
+                                    "attribute" : "irods::indexing::index",
+                                    "entity_type" : "collection"
+                                }
+                            },
+                            "policy_to_invoke" : "irods_policy_indexing_full_text_index_elasticsearch",
                             "configuration" : {
-                                "policies_to_invoke" : [
-                                    {
-                                        "conditional" : {
-                                            "metadata" : {
-                                                "attribute" : "irods::indexing::index",
-                                                "entity_type" : "data_object"
-                                            },
-                                        },
-                                        "policy"    : "irods_policy_indexing_full_text_index_elasticsearch",
-                                        "configuration" : {
-                                            "hosts" : ["http://localhost:9200/"],
-                                            "bulk_count" : 100,
-                                            "read_size" : 1024
-                                        }
-                                    }
-                                ]
+                                    "hosts" : ["http://localhost:9200/"],
+                                    "bulk_count" : 100,
+                                    "read_size" : 1024
                             }
                         }
                     ]
@@ -74,15 +68,15 @@ def index_event_handler_configured(arg=None):
                              "active_policy_clauses" : ["post"],
                              "events" : ["metadata"],
                              "conditional" : {
-                                 "metadata" : {
+                                 "metadata_applied" : {
                                      "attribute"   : "irods::indexing::index",
                                      "entity_type" : "collection",
                                      "operation"   : ["set", "add"]
                                  }
                              },
-                             "policy" : "irods_policy_query_processor",
+                             "policy_to_invoke" : "irods_policy_query_processor",
                              "parameters" : {
-                                   "query_string" : "SELECT USER_NAME, COLL_NAME, DATA_NAME, RESC_NAME WHERE COLL_NAME = 'IRODS_TOKEN_COLLECTION_NAME'",
+                                   "query_string" : "SELECT USER_NAME, COLL_NAME, DATA_NAME, RESC_NAME WHERE COLL_NAME = 'IRODS_TOKEN_COLLECTION_NAME_END_TOKEN'",
                                    "query_limit" : 0,
                                    "query_type" : "general",
                                    "number_of_threads" : 1,
@@ -98,27 +92,6 @@ def index_event_handler_configured(arg=None):
                 }
             }
         )
-
-        irods_config.server_config['plugin_configuration']['rule_engines'].insert(0,
-           {
-                "instance_name": "irods_rule_engine_plugin-event_generator-object_metadata-instance",
-                "plugin_name": "irods_rule_engine_plugin-event_generator-object_metadata",
-                "plugin_specific_configuration": {
-                    "log_errors" : "true"
-                }
-           }
-        )
-
-        irods_config.server_config['plugin_configuration']['rule_engines'].insert(0,
-           {
-                "instance_name": "irods_rule_engine_plugin-event_delegate-collection_metadata-instance",
-                "plugin_name": "irods_rule_engine_plugin-event_delegate-collection_metadata",
-                "plugin_specific_configuration": {
-                    "log_errors" : "true"
-                }
-           }
-        )
-
 
         irods_config.server_config['plugin_configuration']['rule_engines'].insert(0,
            {
