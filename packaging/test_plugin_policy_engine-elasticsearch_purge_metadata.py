@@ -40,14 +40,27 @@ def metadata_event_handler_configured(arg=None):
                              "active_policy_clauses" : ["post"],
                              "events" : ["metadata"],
                              "conditional" : {
-                                 "metadata_applied" : {
-                                     "operation"   : ["set", "add"],
-                                     "entity_type" : "data_object"
-                                 },
                                  "metadata_exists" : {
                                      "recursive" : "true",
                                      "attribute"   : "irods::indexing::index",
                                      "entity_type" : "data_object"
+                                 },
+                             },
+                             "policy_to_invoke"    : "irods_policy_indexing_metadata_index_elasticsearch",
+                             "configuration" : {
+                                 "hosts" : ["http://localhost:9200/"],
+                                 "bulk_count" : 100,
+                                 "read_size" : 4194304
+                             }
+                         },
+                         {
+                             "active_policy_clauses" : ["post"],
+                             "events" : ["metadata"],
+                             "conditional" : {
+                                 "metadata_exists" : {
+                                     "recursive" : "true",
+                                     "attribute"   : "irods::indexing::index",
+                                     "entity_type" : "collection"
                                  },
                              },
                              "policy_to_invoke"    : "irods_policy_indexing_metadata_index_elasticsearch",
@@ -93,6 +106,27 @@ def metadata_event_handler_configured(arg=None):
                                      "recursive"   : "true",
                                      "attribute"   : "irods::indexing::index",
                                      "entity_type" : "data_object"
+                                 },
+                             },
+                             "policy_to_invoke"    : "irods_policy_indexing_metadata_purge_elasticsearch",
+                             "configuration" : {
+                                 "hosts" : ["http://localhost:9200/"],
+                                 "bulk_count" : 100,
+                                 "read_size" : 4194304
+                             }
+                         },
+                         {
+                             "active_policy_clauses" : ["post"],
+                             "events" : ["metadata"],
+                             "conditional" : {
+                                 "metadata_applied" : {
+                                     "operation"   : ["rm"],
+                                     "entity_type" : "collection"
+                                 },
+                                 "metadata_exists" : {
+                                     "recursive"   : "true",
+                                     "attribute"   : "irods::indexing::index",
+                                     "entity_type" : "collection"
                                  },
                              },
                              "policy_to_invoke"    : "irods_policy_indexing_metadata_purge_elasticsearch",
@@ -246,7 +280,7 @@ class TestElasticSearchIndexingMetadata(ResourceBase, unittest.TestCase):
     def tearDown(self):
         super(TestElasticSearchIndexingMetadata, self).tearDown()
 
-    def test_purge_rm__metadata(self):
+    def test_rm_metadata_from_object(self):
         self.repave_index()
         with session.make_session_for_existing_admin() as admin_session:
             admin_session.assert_icommand('imeta set -C /tempZone/home irods::indexing::index metadata_index::metadata elasticsearch')
@@ -265,6 +299,27 @@ class TestElasticSearchIndexingMetadata(ResourceBase, unittest.TestCase):
             finally:
                 admin_session.assert_icommand('imeta rm -C /tempZone/home irods::indexing::index metadata_index::metadata elasticsearch')
                 admin_session.assert_icommand('irm -f ' + filename)
+                admin_session.assert_icommand('iadmin rum')
+
+    def test_indexing_rm_metadata_from_collection(self):
+        self.repave_index()
+        with session.make_session_for_existing_admin() as admin_session:
+            admin_session.assert_icommand('imeta set -C /tempZone/home irods::indexing::index metadata_index::metadata elasticsearch')
+            admin_session.assert_icommand('imkdir test_coll')
+
+            try:
+                with metadata_event_handler_configured():
+                    admin_session.assert_icommand('imeta set -C test_coll a0 v0 u0')
+                    assert_index_content('"attribute" : "a0"')
+                    assert_index_content('"value" : "v0"')
+                    assert_index_content('"units" : "u0"')
+
+                    admin_session.assert_icommand('imeta rm -C test_coll a0 v0 u0')
+                    assert_index_content('"hits" : [ ]')
+
+            finally:
+                admin_session.assert_icommand('imeta rm -C /tempZone/home irods::indexing::index metadata_index::metadata elasticsearch')
+                admin_session.assert_icommand('irm -r test_coll')
                 admin_session.assert_icommand('iadmin rum')
 
     def test_purge_full_collection(self):

@@ -3,6 +3,7 @@
 
 #include "policy_composition_framework_configuration_manager.hpp"
 #include "policy_composition_framework_parameter_capture.hpp"
+#include "policy_composition_framework_keywords.hpp"
 
 #include "cpr/response.h"
 #include "elasticlient/client.h"
@@ -11,6 +12,7 @@
 
 namespace {
     namespace pe   = irods::policy_composition::policy_engine;
+    namespace kw   = irods::policy_composition::keywords;
     namespace idx  = irods::indexing;
     namespace fs   = irods::experimental::filesystem;
     namespace fsvr = irods::experimental::filesystem::server;
@@ -106,23 +108,26 @@ namespace {
         }
 
         // clang-format off
-        const auto cfg   = pe::configuration_manager{ctx.instance_name, ctx.configuration};
-        const auto hosts = cfg.get("hosts", std::vector<std::string>{});
-        const auto verb  = std::string{"true"} == cfg.get(std::string{"log_errors"}, std::string{"false"});
+        const auto cfg         = pe::configuration_manager{ctx.instance_name, ctx.configuration};
+        const auto hosts       = cfg.get("hosts", std::vector<std::string>{});
+        const auto verb        = std::string{"true"} == cfg.get(std::string{kw::log_errors}, std::string{"false"});
+        const auto is_idx_md   = idx::metadata_is_indexing(ctx.parameters.at(kw::metadata));
+        const auto index_name  = idx::get_index_name(ctx.parameters);
         // clang-format on
 
         auto [u, logical_path, sr, dr] =
             capture_parameters(ctx.parameters, tag_first_resc);
 
-        const auto index_name = idx::get_index_name(ctx.parameters);
 
         const auto [attribute, value, units, operation, entity, entity_type] =
-            idx::extract_all(ctx.parameters.at("metadata"));
+            idx::extract_all(ctx.parameters.at(kw::metadata));
 
         elasticlient::Client client{hosts};
 
-        if("data_object" == entity_type) {
-            if(!operation.empty() && "rm" != operation) {
+        if(kw::data_object == entity_type
+           || (kw::collection == entity_type && !is_idx_md)) {
+
+            if(!operation.empty() && kw::remove != operation) {
                 return SUCCESS();
             }
 
@@ -136,7 +141,7 @@ namespace {
                        , units
                        , verb);
         }
-        else if("collection" == entity_type) {
+        else if(kw::collection == entity_type) {
             return purge_metadata_for_object(
                          ctx.rei->rsComm
                        , client

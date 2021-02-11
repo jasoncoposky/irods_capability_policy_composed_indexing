@@ -6,6 +6,7 @@
 
 #include "policy_composition_framework_configuration_manager.hpp"
 #include "policy_composition_framework_parameter_capture.hpp"
+#include "policy_composition_framework_keywords.hpp"
 
 #include "transport/default_transport.hpp"
 #include "dstream.hpp"
@@ -18,6 +19,7 @@
 
 namespace {
     namespace pe   = irods::policy_composition::policy_engine;
+    namespace kw   = irods::policy_composition::keywords;
     namespace idx  = irods::indexing;
     namespace fs   = irods::experimental::filesystem;
     namespace fsvr = irods::experimental::filesystem::server;
@@ -76,9 +78,9 @@ namespace {
 
         // clang-format off
         const auto cfg_mgr     = pe::configuration_manager{ctx.instance_name, ctx.configuration};
-        const auto event       = std::string{ctx.parameters.at("event")};
+        const auto event       = std::string{ctx.parameters.at(kw::event)};
         const auto hosts       = cfg_mgr.get("hosts", std::vector<std::string>{});
-        const auto log_verbose = std::string{"true"} == cfg_mgr.get("log_errors", std::string{"false"});
+        const auto log_verbose = std::string{"true"} == cfg_mgr.get(kw::log_errors, std::string{"false"});
         const auto index_name  = idx::get_index_name(ctx.parameters);
         // clang-format on
 

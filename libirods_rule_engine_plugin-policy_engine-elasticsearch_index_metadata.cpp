@@ -3,6 +3,7 @@
 
 #include "policy_composition_framework_configuration_manager.hpp"
 #include "policy_composition_framework_parameter_capture.hpp"
+#include "policy_composition_framework_keywords.hpp"
 
 #include "cpr/response.h"
 #include "elasticlient/client.h"
@@ -12,10 +13,13 @@
 #include "fmt/format.h"
 
 namespace {
+    // clang-format off
+    namespace kw   = irods::policy_composition::keywords;
     namespace pe   = irods::policy_composition::policy_engine;
     namespace idx  = irods::indexing;
     namespace fs   = irods::experimental::filesystem;
     namespace fsvr = irods::experimental::filesystem::server;
+    // clang-format on
 
     irods::error index_metadata(
           rsComm_t*             comm
@@ -132,8 +136,8 @@ namespace {
         // clang-format off
         const auto cfg_mgr     = pe::configuration_manager{ctx.instance_name, ctx.configuration};
         const auto hosts       = cfg_mgr.get("hosts", std::vector<std::string>{});
-        const auto log_verbose = std::string{"true"} == cfg_mgr.get(std::string{"log_errors"}, std::string{"false"});
-        const auto is_idx_md   = idx::metadata_is_indexing(ctx.parameters.at("metadata"));
+        const auto log_verbose = std::string{"true"} == cfg_mgr.get(std::string{kw::log_errors}, std::string{"false"});
+        const auto is_idx_md   = idx::metadata_is_indexing(ctx.parameters.at(kw::metadata));
         const auto index_name  = idx::get_index_name(ctx.parameters);
         // clang-format on
 
@@ -143,14 +147,14 @@ namespace {
             capture_parameters(ctx.parameters, tag_first_resc);
 
         const auto [attribute, value, units, operation, entity, entity_type] =
-            idx::extract_all(ctx.parameters.at("metadata"));
+            idx::extract_all(ctx.parameters.at(kw::metadata));
 
-        if("set" != operation && "add" != operation) {
+        if(kw::set != operation && kw::add != operation) {
             return SUCCESS();
         }
 
-        if("data_object" == entity_type
-           || ("collection" == entity_type && !is_idx_md)) {
+        if(kw::data_object == entity_type
+           || (kw::collection == entity_type && !is_idx_md)) {
             // adding an individual avu to an object or collection
             return index_metadata(
                          ctx.rei->rsComm
@@ -162,7 +166,7 @@ namespace {
                        , units
                        , log_verbose);
         }
-        else if("collection" == entity_type && is_idx_md) {
+        else if(kw::collection == entity_type && is_idx_md) {
             // annotated a collection to be indexed
             return index_metadata_for_object(
                          ctx.rei->rsComm
