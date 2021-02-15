@@ -1,9 +1,9 @@
 # irods_capability_policy_composed_indexing
 
-iRODS Rule Engine Plugin Policy Engines designed to work with the [Event Handler Framewor](https://github.com/jasoncoposky/irods_rule_engine_plugins_policy) for full text and metadata indexing with Elastic Search.
+iRODS Rule Engine Plugin Policy Engines designed to work with the [Event Handler Framework](https://github.com/jasoncoposky/irods_rule_engine_plugins_policy) for full text and metadata indexing with Elastic Search.
 
-### Rule Engine Plugin Configuration
-## Metadata Indexing
+## Rule Engine Plugin Configuration
+### Metadata Indexing
 ```
     {
         {
@@ -91,7 +91,7 @@ iRODS Rule Engine Plugin Policy Engines designed to work with the [Event Handler
     }
 ```
 
-## Full Text Indexing
+### Full Text Indexing
 
 ```
     {
